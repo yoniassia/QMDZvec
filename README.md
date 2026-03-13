@@ -30,6 +30,18 @@ REST API (port 3500) ←→ All Agents
 MCP Server (stdio) ←→ MCP Clients
 ```
 
+## Install via ClawHub
+
+```bash
+clawhub install memclawz
+```
+
+This installs the OpenClaw skill with full docs, install script, and API reference. Then run:
+
+```bash
+bash ~/.openclaw/workspace/skills/memclawz/scripts/install.sh
+```
+
 ## Quick Start
 
 ```bash
