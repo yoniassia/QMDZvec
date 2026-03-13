@@ -6,10 +6,12 @@ from datetime import datetime
 
 
 def load_json(path: str | Path) -> dict:
-    """Load JSON file, return empty dict if missing."""
+    """Load JSON file, return empty dict if missing or empty."""
     path = Path(path)
     if path.exists():
-        return json.loads(path.read_text())
+        text = path.read_text().strip()
+        if text:
+            return json.loads(text)
     return {}
 
 

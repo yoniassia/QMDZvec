@@ -1,5 +1,5 @@
 [Unit]
-Description=MemClawz v5 — Shared Memory Bus API (port 3500)
+Description=MemClawz v6 — Shared Memory Bus API (port 3500)
 After=network.target
 
 [Service]

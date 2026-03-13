@@ -1,9 +1,13 @@
-"""MemClawz MCP Server — exposes fleet memory to MCP clients via STDIO."""
+"""MemClawz v6 MCP Server — exposes fleet memory to MCP clients via STDIO.
+
+v6 additions: composite scoring, graph search, compaction tools.
+"""
 import json
 import sys
 from mem0 import Memory
 
 from .config import MEM0_CONFIG_LITE
+from .scoring import score_results
 
 mem = Memory.from_config(MEM0_CONFIG_LITE)
 
@@ -20,7 +24,7 @@ def _unwrap(result):
 TOOLS = [
     {
         "name": "search_memory",
-        "description": "Search YoniClaw fleet memories semantically",
+        "description": "Search YoniClaw fleet memories semantically with composite scoring",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -31,6 +35,7 @@ TOOLS = [
                     "description": "Filter by memory type (fact/decision/preference/procedure/relationship/event/insight)",
                 },
                 "limit": {"type": "integer", "default": 10},
+                "use_composite": {"type": "boolean", "default": True, "description": "Use composite scoring (v6)"},
             },
             "required": ["query"],
         },
@@ -60,6 +65,38 @@ TOOLS = [
             "required": ["agent"],
         },
     },
+    {
+        "name": "compact_session",
+        "description": "Trigger session compaction for a given session",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Session identifier"},
+                "agent_id": {"type": "string", "default": "main"},
+            },
+            "required": ["session_id"],
+        },
+    },
+    {
+        "name": "reflect",
+        "description": "Trigger sleep-time reflection on recent memories",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "default": 24, "description": "Hours to look back"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "memory_stats",
+        "description": "Get memory system statistics and health",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -71,7 +108,7 @@ def handle_request(request: dict) -> dict:
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "memclawz", "version": "5.0.0"},
+            "serverInfo": {"name": "memclawz", "version": "6.0.0"},
         }
 
     elif method == "tools/list":
@@ -88,6 +125,9 @@ def handle_request(request: dict) -> dict:
                 results = [r for r in results if r.get("metadata", {}).get("agent") == args["agent"]]
             if args.get("type"):
                 results = [r for r in results if r.get("metadata", {}).get("type") == args["type"]]
+            # Composite scoring
+            if args.get("use_composite", True):
+                results = score_results(results)
             return {"content": [{"type": "text", "text": json.dumps(results, indent=2, default=str)}]}
 
         elif tool_name == "add_memory":
@@ -110,6 +150,45 @@ def handle_request(request: dict) -> dict:
                     {"type": "text", "text": json.dumps(filtered[: args.get("limit", 20)], indent=2, default=str)}
                 ]
             }
+
+        elif tool_name == "compact_session":
+            from .compactor import SessionCompactor
+            compactor = SessionCompactor()
+            result = compactor.compact_session(
+                session_id=args["session_id"],
+                messages=[],  # MCP caller would need to provide messages
+                agent_id=args.get("agent_id", "main"),
+            )
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
+
+        elif tool_name == "reflect":
+            from .reflection import ReflectionEngine
+            engine = ReflectionEngine()
+            result = engine.reflect(hours=args.get("hours", 24))
+            return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
+
+        elif tool_name == "memory_stats":
+            all_mems = _unwrap(mem.get_all(user_id="yoni", limit=10000))
+            types = {}
+            agents = {}
+            for m in all_mems:
+                meta = m.get("metadata", {})
+                t = meta.get("type", "unknown")
+                a = meta.get("agent", "unknown")
+                types[t] = types.get(t, 0) + 1
+                agents[a] = agents.get(a, 0) + 1
+            stats = {
+                "total_memories": len(all_mems),
+                "by_type": types,
+                "by_agent": agents,
+            }
+            # Add compaction status
+            try:
+                from .compactor import get_compaction_status
+                stats["compaction"] = get_compaction_status()
+            except Exception:
+                pass
+            return {"content": [{"type": "text", "text": json.dumps(stats, indent=2, default=str)}]}
 
         return {"error": {"code": -32601, "message": f"Unknown tool: {tool_name}"}}
 

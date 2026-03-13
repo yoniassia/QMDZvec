@@ -1,10 +1,10 @@
 [Unit]
-Description=MemClawz v6 — LCM Auto-Extract Watcher (+ Graphiti feed)
+Description=MemClawz v6 — Compaction Cron (30-min cycle)
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/home/yoniclaw/memclawz/.venv/bin/python -m memclawz.watcher
+ExecStart=/home/yoniclaw/memclawz/.venv/bin/python -m memclawz.compaction_cron
 WorkingDirectory=/home/yoniclaw/memclawz
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/home/yoniclaw/memclawz/.env

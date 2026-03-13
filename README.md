@@ -1,145 +1,134 @@
-# MemClawz v5 🧠
+# MemClawz v6 🧠
 
-**AI Agent Fleet Memory System** — auto-extract from conversations, shared memory bus, typed memories, contradiction detection, relevance decay, MCP server.
+AI Agent Fleet Memory System — composite scoring, compaction engine, Graphiti temporal knowledge graph, multi-claw federation, sleep-time reflection, MCP server.
 
-Built on [Mem0](https://github.com/mem0ai/mem0) + [Qdrant](https://qdrant.tech/).
+## What's New in v6
 
-## Features
-
-- 🔄 **Live Auto-Extract Pipeline** — watches LCM conversation summaries, extracts and classifies memories automatically
-- 🌐 **Shared Memory Bus** — REST API for all agents to search, add, and manage memories
-- 🏷️ **Typed Classification** — 7 memory types (fact, decision, preference, procedure, relationship, event, insight)
-- ⚔️ **Contradiction Detection** — identifies superseded information when new memories conflict with existing ones
-- 📉 **Relevance Decay** — time-based scoring with configurable half-life (90 days), persistent types resist decay
-- 🔌 **MCP Server** — Model Context Protocol integration for Claude Desktop and other MCP clients
-- 📥 **Bulk Import** — import from markdown, SQLite, or JSONL sources
-- 🧭 **Local-First Canonical Order** — workspace memory files are the source of truth; MemClawz mirrors and indexes them after verification
-
-## Canonical Memory Order
-
-MemClawz is designed to be the **shared/indexed layer**, not the only source of truth.
-
-Order of truth:
-1. **Local canonical files first** — `MEMORY.md`, `memory/*.md`, `memory/people/*`, `memory/sessions/*`, `knowledge/*.md`, `AGENTS.md`
-2. **MemClawz second** — Qdrant + Mem0 + shared API + Explorer + MCP
-3. **LCM/transcripts third** — raw capture and extraction layer
-
-Required write flow:
-1. Update local canonical memory first
-2. Read/verify local files
-3. Sync/import into MemClawz
-4. Test retrieval through MemClawz API / Explorer
+- **Composite Scoring** — Weighted blend of semantic similarity + recency decay + importance + access frequency (replaces raw cosine)
+- **Compaction Engine** — Three-tier: session compactor, daily digest, weekly merge with deduplication
+- **Graphiti Integration** — Neo4j temporal knowledge graph for entity relationships, contradiction detection, temporal fact management
+- **Multi-Claw Federation** — HTTP push/pull protocol for sharing memories across fleet (YoniClaw master + remote nodes)
+- **Sleep-Time Reflection** — LLM-driven pattern detection, insight generation, and MEMORY.md update proposals
+- **Enhanced MCP Server** — New tools: compact_session, reflect, memory_stats
 
 ## Architecture
 
 ```
-LCM Database (conversations)
-    ↓ watcher (every 30 min)
-    ↓ classify + extract
-    ↓
-Mem0 (embeddings + metadata)
-    ↓
-Qdrant (vector storage, 1536-dim cosine)
-    ↑
-REST API (port 3500) ←→ All Agents
-    ↑
-MCP Server (stdio) ←→ MCP Clients
-```
-
-## Install via ClawHub
-
-```bash
-clawhub install memclawz
-```
-
-This installs the OpenClaw skill with full docs, install script, and API reference. Then run:
-
-```bash
-bash ~/.openclaw/workspace/skills/memclawz/scripts/install.sh
+┌─────────────────────────────────────────────────┐
+│              MemClawz v6 Master (YoniClaw)       │
+│                                                   │
+│  FastAPI :3500  │  Qdrant :6333  │  Neo4j :7687  │
+│                                                   │
+│  Mem0 + Composite Scoring + Graphiti              │
+│  Compaction: Session │ Daily │ Weekly             │
+│  Reflection Engine                                │
+│  Federation: register / push / pull / sync        │
+└─────────────────────────────────────────────────┘
+         ▲              ▲              ▲
+    Clawdet         MoneyClaw      WhiteRabbit
 ```
 
 ## Quick Start
 
 ```bash
-cd ~/memclawz
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Install
+pip install -e .
 
-# Start API
-uvicorn memclawz.api:app --host 0.0.0.0 --port 3500
+# Configure
+cp .env.example .env
+# Edit .env with your API keys and Neo4j settings
 
-# Start watcher (separate terminal)
-python -m memclawz.watcher
+# Start services
+systemctl --user start neo4j
+systemctl --user start memclawz-api
+systemctl --user start memclawz-watcher
+systemctl --user start memclawz-cron
 ```
 
-## API
+## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/api/v1/search?q=...` | GET | Semantic search |
-| `/api/v1/add` | POST | Add memory |
-| `/api/v1/memories` | GET | List memories |
-| `/api/v1/agents` | GET | Agent memory counts |
-| `/api/v1/stats` | GET | System statistics |
-| `/api/v1/memory/{id}` | DELETE | Delete memory |
-| `/api/v1/memory/{id}` | PUT | Update memory |
+### Core (v5 compatible)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check (Qdrant, Neo4j, Federation) |
+| GET | `/api/v1/search?q=...` | Semantic search with composite scoring |
+| POST | `/api/v1/add` | Add memory (feeds Qdrant + Graphiti) |
+| GET | `/api/v1/memories` | List memories |
+| GET | `/api/v1/agents` | List agents with counts |
+| GET | `/api/v1/stats` | System statistics |
 
-## Memory Types
+### Graph (v6)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/graph/search?q=...` | Graphiti temporal graph search |
+| GET | `/api/v1/graph/entity/{name}` | Entity relationships |
 
-| Type | Description | Decay |
-|------|-------------|-------|
-| `decision` | Choices made | Persistent (floor 50%) |
-| `preference` | User preferences | Persistent (floor 50%) |
-| `relationship` | People, contacts | Persistent (floor 50%) |
-| `insight` | Learned lessons | Normal (90-day half-life) |
-| `procedure` | Workflows, how-tos | Normal |
-| `fact` | General facts | Normal |
-| `event` | Time-specific events | Normal |
+### Compaction (v6)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/compact/session` | Trigger session compaction |
+| POST | `/api/v1/compact/daily` | Generate daily digest |
+| POST | `/api/v1/compact/weekly` | Run weekly merge |
+| GET | `/api/v1/compact/status` | Compaction health |
 
-## Configuration
+### Reflection (v6)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/reflect` | Trigger reflection analysis |
 
-Copy `.env.example` to `.env` and set your API keys. Or export them as environment variables:
+### Federation (v6)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/federation/register` | Register a remote node |
+| POST | `/api/v1/federation/push` | Push memories from remote |
+| POST | `/api/v1/federation/pull` | Pull memories to remote |
+| POST | `/api/v1/federation/sync` | Bidirectional sync |
+| GET | `/api/v1/federation/status` | Federation health |
 
-```bash
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...
+## Composite Scoring
+
+```
+score = (w_semantic × similarity + w_recency × decay + w_importance × weight) × access_boost
 ```
 
-## Systemd Services
+- **Semantic similarity**: 50% weight (cosine from Qdrant)
+- **Recency decay**: 30% weight (exponential, 90-day half-life)
+- **Importance**: 20% weight (type-based: decisions > preferences > facts > events)
+- **Access boost**: up to 1.5× for frequently accessed memories
+- **Persistent types** (decisions, preferences, relationships): minimum 40% recency floor
 
-```bash
-# Link and enable
-ln -sf ~/memclawz/systemd/memclawz-api.service ~/.config/systemd/user/
-ln -sf ~/memclawz/systemd/memclawz-watcher.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now memclawz-api memclawz-watcher
+## Project Structure
+
+```
+memclawz/
+├── __init__.py
+├── config.py           # All configuration (Qdrant, Neo4j, Federation, etc.)
+├── api.py              # FastAPI REST API (v6 endpoints)
+├── scoring.py          # Composite relevance scoring
+├── compactor.py        # Session/daily/weekly compaction
+├── graphiti_layer.py   # Neo4j + Graphiti temporal graph
+├── federation.py       # Multi-claw federation protocol
+├── reflection.py       # Sleep-time reflection engine
+├── watcher.py          # LCM → Mem0 → Qdrant + Graphiti pipeline
+├── compaction_cron.py  # Automated compaction scheduler
+├── classifier.py       # Memory type classification
+├── contradiction.py    # Contradiction detection (+ Graphiti)
+├── decay.py            # Legacy decay (kept for compatibility)
+├── mcp_server.py       # MCP STDIO server (v6 tools)
+├── importer.py         # Bulk import utilities
+└── utils.py            # Shared utilities
 ```
 
-## MCP Integration
+## Services
 
-Add to your MCP client config:
-
-```json
-{
-  "mcpServers": {
-    "memclawz": {
-      "command": "/home/yoniclaw/memclawz/.venv/bin/python",
-      "args": ["-m", "memclawz.mcp_server"]
-    }
-  }
-}
-```
-
-## Stack
-
-- **Vector DB**: Qdrant
-- **Memory Layer**: Mem0
-- **Embeddings**: OpenAI `text-embedding-3-small`
-- **LLM**: Anthropic Claude Sonnet
-- **API**: FastAPI + Uvicorn
-- **Protocol**: MCP (Model Context Protocol)
+| Service | Port | Description |
+|---------|------|-------------|
+| `memclawz-api` | 3500 | REST API |
+| `memclawz-watcher` | — | LCM auto-extract pipeline |
+| `memclawz-cron` | — | Compaction scheduler (30-min) |
+| `memclawz-mcp` | stdio | MCP server |
+| Neo4j | 7474/7687 | Graph database |
+| Qdrant | 6333 | Vector database |
 
 ## License
 

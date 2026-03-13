@@ -1,5 +1,5 @@
 [Unit]
-Description=MemClawz v5 — MCP Server (STDIO)
+Description=MemClawz v6 — MCP Server (STDIO)
 After=network.target
 
 [Service]

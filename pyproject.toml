@@ -4,8 +4,8 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "memclawz"
-version = "5.0.0"
-description = "AI agent fleet memory system — auto-extract, shared bus, typed memories, contradiction detection, decay scoring, MCP server"
+version = "6.0.0"
+description = "AI agent fleet memory system — composite scoring, compaction engine, Graphiti temporal graph, multi-claw federation, sleep-time reflection, MCP server"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -19,12 +19,15 @@ dependencies = [
     "openai>=1.60.0",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
+    "graphiti-core>=0.28.0",
+    "neo4j>=5.0.0",
 ]
 
 [project.scripts]
 memclawz-watcher = "memclawz.watcher:main"
 memclawz-api = "memclawz.api:main"
 memclawz-mcp = "memclawz.mcp_server:main"
+memclawz-cron = "memclawz.compaction_cron:main"
 
 [tool.setuptools.packages.find]
 include = ["memclawz*"]

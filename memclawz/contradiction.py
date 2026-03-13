@@ -1,4 +1,11 @@
-"""Contradiction detection for incoming memories."""
+"""Contradiction detection for incoming memories.
+
+v6: Enhanced with optional Graphiti temporal checks.
+"""
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def check_contradiction(mem_instance, new_memory: str, user_id: str = "yoni", threshold: float = 0.85) -> list[dict]:
@@ -7,6 +14,8 @@ def check_contradiction(mem_instance, new_memory: str, user_id: str = "yoni", th
     Returns list of potential contradictions with suggested actions.
     """
     similar = mem_instance.search(new_memory, user_id=user_id, limit=5)
+    if isinstance(similar, dict):
+        similar = similar.get("results", [])
     contradictions = []
 
     for existing in similar:
@@ -24,6 +33,36 @@ def check_contradiction(mem_instance, new_memory: str, user_id: str = "yoni", th
                 )
 
     return contradictions
+
+
+async def check_contradiction_graphiti(query: str, group_id: str = "yoniclaw") -> list[dict]:
+    """Check for temporal contradictions using Graphiti.
+
+    Graphiti automatically handles contradiction detection via
+    temporal edge invalidation. This function searches for
+    invalidated edges related to the query.
+    """
+    try:
+        from .graphiti_layer import search
+        from .config import GRAPHITI_ENABLED
+
+        if not GRAPHITI_ENABLED:
+            return []
+
+        results = await search(query, num_results=10, group_ids=[group_id])
+        contradictions = []
+        for r in results:
+            if r.get("expired") or r.get("invalid_at"):
+                contradictions.append({
+                    "fact": r.get("fact", ""),
+                    "valid_at": r.get("valid_at"),
+                    "invalid_at": r.get("invalid_at"),
+                    "action": "expired",
+                })
+        return contradictions
+    except Exception as e:
+        logger.warning(f"Graphiti contradiction check failed: {e}")
+        return []
 
 
 def is_update(old_text: str, new_text: str) -> bool:

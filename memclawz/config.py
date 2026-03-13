@@ -1,4 +1,4 @@
-"""Centralized configuration for MemClawz v5"""
+"""Centralized configuration for MemClawz v6"""
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -32,9 +32,19 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "yoniclaw_memories")
 
+# Neo4j / Graphiti (v6)
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")  # Auth disabled for local
+GRAPHITI_ENABLED = os.getenv("GRAPHITI_ENABLED", "true").lower() in ("true", "1", "yes")
+GRAPHITI_GROUP_ID = os.getenv("GRAPHITI_GROUP_ID", "yoniclaw")
+
 # LCM
 LCM_DB_PATH = os.getenv("LCM_DB_PATH", "/home/yoniclaw/.openclaw/lcm.db")
 AGENTS_DIR = os.getenv("AGENTS_DIR", "/home/yoniclaw/.openclaw/agents")
+
+# Workspace
+WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", "/home/yoniclaw/.openclaw/workspace"))
 
 # Watcher
 STATE_DIR = Path(os.getenv("MEMCLAWZ_STATE_DIR", os.path.expanduser("~/.memclawz")))
@@ -44,6 +54,15 @@ SYNC_INTERVAL = int(os.getenv("SYNC_INTERVAL", "1800"))  # 30 min
 # API
 API_PORT = int(os.getenv("MEMCLAWZ_API_PORT", "3500"))
 API_HOST = os.getenv("MEMCLAWZ_API_HOST", "0.0.0.0")
+
+# Compaction thresholds (v6)
+COMPACTION_THRESHOLD_WARN = float(os.getenv("COMPACTION_THRESHOLD_WARN", "0.6"))
+COMPACTION_THRESHOLD_URGENT = float(os.getenv("COMPACTION_THRESHOLD_URGENT", "0.8"))
+COMPACTION_INTERVAL = int(os.getenv("COMPACTION_INTERVAL", "1800"))  # 30 min
+
+# Federation (v6)
+FEDERATION_ENABLED = os.getenv("FEDERATION_ENABLED", "true").lower() in ("true", "1", "yes")
+FEDERATION_ROLE = os.getenv("FEDERATION_ROLE", "master")  # master or node
 
 # Mem0 config
 MEM0_CONFIG = {
