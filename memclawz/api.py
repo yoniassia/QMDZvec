@@ -56,6 +56,7 @@ app = FastAPI(title="MemClawz v6 API", version="6.0.0", lifespan=lifespan)
 
 # Initialize Mem0
 mem = Memory.from_config(MEM0_CONFIG)
+router_engine = MemClawzRouter(mem)
 
 
 # --- Models ---
@@ -266,6 +267,12 @@ async def update_memory(memory_id: str, req: UpdateMemoryRequest):
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"status": "updated"}
+
+
+@app.get("/api/v1/route")
+async def route_task(task: str, include_context: bool = True):
+    """Route a task to the right agent."""
+    return router_engine.route(task, include_context=include_context)
 
 
 # --- Graphiti Endpoints (v6) ---

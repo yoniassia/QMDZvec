@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 AGENT_REGISTRY = {
@@ -79,6 +80,23 @@ class MemClawzRouter:
         self.mem = mem_instance
         self.registry = AGENT_REGISTRY
 
+    @staticmethod
+    def _normalize_word(word: str) -> str:
+        word = re.sub(r"[^a-z0-9]+", "", word.lower())
+        if len(word) > 3 and word.endswith("s"):
+            return word[:-1]
+        return word
+
+    def _domain_matches(self, domain: str, task_lower: str, task_terms: set[str]) -> bool:
+        if domain in task_lower:
+            return True
+        domain_terms = {
+            self._normalize_word(part)
+            for part in domain.split()
+            if self._normalize_word(part)
+        }
+        return bool(domain_terms) and domain_terms.issubset(task_terms)
+
     def _search_memories(self, task: str) -> list[dict[str, Any]]:
         if not self.mem:
             return []
@@ -92,10 +110,15 @@ class MemClawzRouter:
     def route(self, task: str, include_context: bool = True) -> dict[str, Any]:
         """Route a task to the right agent."""
         task_lower = task.lower()
+        task_terms = {
+            self._normalize_word(part)
+            for part in re.findall(r"[a-zA-Z0-9]+", task_lower)
+            if self._normalize_word(part)
+        }
 
         scores: dict[str, int] = {}
         for agent_id, info in self.registry.items():
-            score = sum(1 for d in info["domains"] if d in task_lower)
+            score = sum(1 for d in info["domains"] if self._domain_matches(d, task_lower, task_terms))
             if score > 0:
                 scores[agent_id] = score
 
@@ -135,7 +158,7 @@ class MemClawzRouter:
                 pass
 
         info = self.registry.get(best, DEFAULT_AGENT_INFO)
-        matched_domains = [d for d in info.get("domains", []) if d in task_lower]
+        matched_domains = [d for d in info.get("domains", []) if self._domain_matches(d, task_lower, task_terms)]
 
         return {
             "agent_id": best,
