@@ -64,21 +64,41 @@ class ReflectionEngine:
         recent = []
         for m in all_mems:
             meta = m.get("metadata", {})
-            extracted = meta.get("extracted_at", meta.get("created_at", ""))
+            # Check extracted_at, created_at, or top-level created_at
+            extracted = (
+                meta.get("extracted_at")
+                or meta.get("created_at")
+                or m.get("created_at", "")
+            )
             if extracted:
                 try:
                     ext_dt = datetime.fromisoformat(extracted.replace("Z", "+00:00"))
-                    if ext_dt >= cutoff:
+                    # Ensure both are timezone-aware for comparison
+                    if ext_dt.tzinfo is None:
+                        ext_dt = ext_dt.replace(tzinfo=timezone.utc)
+                    cutoff_aware = cutoff if cutoff.tzinfo else cutoff.replace(tzinfo=timezone.utc)
+                    if ext_dt >= cutoff_aware:
                         recent.append(m)
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
 
         recent = recent[:max_memories]
 
+        # Fallback: if no recent memories found, use most recent N memories overall
+        if not recent:
+            logger.info("No recent memories by timestamp, falling back to most recent %d", max_memories)
+            # Sort by any available timestamp, newest first
+            def _sort_key(m):
+                meta = m.get("metadata", {})
+                ts = meta.get("extracted_at") or meta.get("created_at") or m.get("created_at", "")
+                return ts or ""
+            sorted_mems = sorted(all_mems, key=_sort_key, reverse=True)
+            recent = sorted_mems[:max_memories]
+
         if not recent:
             return {
                 "status": "empty",
-                "message": "No recent memories to reflect on",
+                "message": "No memories available to reflect on",
                 "since": cutoff.isoformat(),
             }
 

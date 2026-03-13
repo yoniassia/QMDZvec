@@ -18,6 +18,7 @@ from mem0 import Memory
 
 from .config import MEM0_CONFIG, API_HOST, API_PORT, GRAPHITI_ENABLED, FEDERATION_ENABLED
 from .scoring import score_results
+from .router import MemClawzRouter
 from .federation import (
     NodeRegistration,
     FederationPushRequest,
@@ -339,6 +340,7 @@ async def compact_status():
 # --- Reflection Endpoint (v6) ---
 
 @app.post("/api/v1/reflect")
+@app.post("/api/v1/reflection")
 async def reflect(req: ReflectionRequest | None = None):
     """Trigger sleep-time reflection analysis."""
     from .reflection import ReflectionEngine
