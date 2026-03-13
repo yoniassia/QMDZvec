@@ -13,6 +13,22 @@ Built on [Mem0](https://github.com/mem0ai/mem0) + [Qdrant](https://qdrant.tech/)
 - 📉 **Relevance Decay** — time-based scoring with configurable half-life (90 days), persistent types resist decay
 - 🔌 **MCP Server** — Model Context Protocol integration for Claude Desktop and other MCP clients
 - 📥 **Bulk Import** — import from markdown, SQLite, or JSONL sources
+- 🧭 **Local-First Canonical Order** — workspace memory files are the source of truth; MemClawz mirrors and indexes them after verification
+
+## Canonical Memory Order
+
+MemClawz is designed to be the **shared/indexed layer**, not the only source of truth.
+
+Order of truth:
+1. **Local canonical files first** — `MEMORY.md`, `memory/*.md`, `memory/people/*`, `memory/sessions/*`, `knowledge/*.md`, `AGENTS.md`
+2. **MemClawz second** — Qdrant + Mem0 + shared API + Explorer + MCP
+3. **LCM/transcripts third** — raw capture and extraction layer
+
+Required write flow:
+1. Update local canonical memory first
+2. Read/verify local files
+3. Sync/import into MemClawz
+4. Test retrieval through MemClawz API / Explorer
 
 ## Architecture
 
