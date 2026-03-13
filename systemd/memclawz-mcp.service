@@ -1,0 +1,15 @@
+[Unit]
+Description=MemClawz v5 — MCP Server (STDIO)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/yoniclaw/memclawz/.venv/bin/python -m memclawz.mcp_server
+WorkingDirectory=/home/yoniclaw/memclawz
+Environment=PYTHONUNBUFFERED=1
+StandardInput=socket
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

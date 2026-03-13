@@ -1,0 +1,15 @@
+[Unit]
+Description=MemClawz v5 — LCM Auto-Extract Watcher
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/yoniclaw/memclawz/.venv/bin/python -m memclawz.watcher
+WorkingDirectory=/home/yoniclaw/memclawz
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/yoniclaw/memclawz/.env
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

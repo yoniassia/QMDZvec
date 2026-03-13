@@ -1,0 +1,15 @@
+[Unit]
+Description=MemClawz v5 — Shared Memory Bus API (port 3500)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/yoniclaw/memclawz/.venv/bin/python -m uvicorn memclawz.api:app --host 0.0.0.0 --port 3500
+WorkingDirectory=/home/yoniclaw/memclawz
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/yoniclaw/memclawz/.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

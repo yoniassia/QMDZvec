@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "memclawz"
+version = "5.0.0"
+description = "AI agent fleet memory system — auto-extract, shared bus, typed memories, contradiction detection, decay scoring, MCP server"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{name = "Yoni Assia"}]
+dependencies = [
+    "mem0ai>=0.1.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "qdrant-client>=1.13.0",
+    "anthropic>=0.45.0",
+    "openai>=1.60.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+memclawz-watcher = "memclawz.watcher:main"
+memclawz-api = "memclawz.api:main"
+memclawz-mcp = "memclawz.mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["memclawz*"]
