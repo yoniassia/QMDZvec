@@ -130,6 +130,55 @@ memclawz/
 | Neo4j | 7474/7687 | Graph database |
 | Qdrant | 6333 | Vector database |
 
+## Current Status (March 2026)
+
+- **Version:** v6.0.0 (ClawHub: memclawz@6.0.1)
+- **Qdrant:** 3,771 vectors, healthy (systemd `Restart=always`)
+- **Neo4j/Graphiti:** Currently disabled (238 nodes, 532 edges from earlier runs)
+- **Federation:** 2 nodes registered
+- **API:** Healthy on port 3500
+- **MCP Server:** Available via stdio
+
+## Known Issues & Fixes
+
+### Mem0 `add()` Returns Empty (FIXED 2026-03-14)
+**Problem:** Mem0 uses an LLM extraction pipeline that rejects already-clean/pre-formatted text as having "nothing to extract." Calling `mem.add()` returns `results: []` for structured facts.
+
+**Fix:** Added direct Qdrant upsert fallback in `/api/v1/add` endpoint. When `mem.add()` returns empty results, the API generates OpenAI embeddings and upserts directly to Qdrant with proper payload structure (`memory`, `hash`, `user_id`, `created_at`, plus flattened `agent`, `type`, `source`).
+
+**File:** `memclawz/api.py` — search for `direct_qdrant` fallback logic.
+
+### Empty `memory` Field in 3,636 Records (FIXED 2026-03-14)
+**Problem:** Early direct Qdrant inserts stored content only in nested `metadata.memory` but left the top-level `memory` field empty. This caused search results to return records with `"memory": ""`.
+
+**Fix:** Batch repair script (`reattribute_memories.py`) extracted content from `metadata.memory` and backfilled the top-level `memory` field across 3,636 records. All records now have proper top-level `memory` field for search and retrieval.
+
+### Agent Tags in Stats (KNOWN)
+Direct Qdrant inserts don't populate the `agent_id` field in Mem0's expected metadata structure. The `by_agent` stats count may undercount direct inserts. Cosmetic issue — doesn't affect search or retrieval.
+
+## Memory Protocol for Agents
+
+Agents writing to MemClawz should use the `/api/v1/add` endpoint:
+
+```bash
+curl -X POST http://localhost:3500/api/v1/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "What was learned or decided",
+    "agent_id": "agent-name",
+    "memory_type": "decision|event|fact|procedure|insight"
+  }'
+```
+
+**Memory types:**
+- `decision` — Choices made (architecture, tools, approach)
+- `event` — What happened (deployed X, fixed Y)
+- `fact` — Discovered information (endpoints, versions, pricing)
+- `procedure` — How something was done (deploy steps, build process)
+- `insight` — Lessons learned (what worked, what didn't)
+
+**Canonical memory order:** Local files first → MemClawz second → LCM third.
+
 ## License
 
 MIT
