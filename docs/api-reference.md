@@ -1,4 +1,4 @@
-# MemClawz v5 API Reference
+# MemClawz v6 API Reference
 
 Base URL: `http://localhost:3500`
 
@@ -21,8 +21,20 @@ GET /api/v1/search?q=<query>&user_id=yoni&agent_id=<agent>&memory_type=<type>&li
 ```
 POST /api/v1/add
 Body: {"content": "...", "user_id": "yoni", "agent_id": "main", "memory_type": "fact", "metadata": {}}
-→ Mem0 add result
+→ {"status": "ok", "id": "uuid", "method": "direct_qdrant"}
 ```
+
+Primary path uses direct Qdrant write + background Mem0 extraction. Fast and reliable.
+
+## Add Memory (Direct)
+
+```
+POST /api/v1/add-direct
+Body: {"content": "...", "user_id": "yoni", "agent_id": "main", "memory_type": "fact", "metadata": {}}
+→ {"status": "ok", "id": "uuid", "method": "direct_qdrant", "graphiti": {...}}
+```
+
+Fast-path: skips Mem0 LLM extraction entirely. Use for bulk imports or pre-clean facts.
 
 ## List Memories
 

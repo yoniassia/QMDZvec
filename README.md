@@ -52,7 +52,8 @@ systemctl --user start memclawz-cron
 |--------|----------|-------------|
 | GET | `/health` | Health check (Qdrant, Neo4j, Federation) |
 | GET | `/api/v1/search?q=...` | Semantic search with composite scoring |
-| POST | `/api/v1/add` | Add memory (feeds Qdrant + Graphiti) |
+| POST | `/api/v1/add` | Add memory (direct Qdrant + background Mem0 + Graphiti) |
+| POST | `/api/v1/add-direct` | Fast-path: skip Mem0 extraction, direct Qdrant + Graphiti |
 | GET | `/api/v1/memories` | List memories |
 | GET | `/api/v1/agents` | List agents with counts |
 | GET | `/api/v1/stats` | System statistics |
@@ -133,11 +134,16 @@ memclawz/
 ## Current Status (March 2026)
 
 - **Version:** v6.0.0 (ClawHub: memclawz@6.0.1)
-- **Qdrant:** 3,771 vectors, healthy (systemd `Restart=always`)
+- **Total Memories:** 3,772 across 16 agents
+- **Agent Distribution:** main (2,826), peopleclaw (257), infraclaw (73), appsclaw (73), tradeclaw (84), qaclaw (118), tradingdataclaw (17), commsclaw (64), moneyclawx (72), cmoclaw (45), devopsoci (32), coinresearchclaw (58), quantclaw (30), paperclipclaw (10), coinsclaw (10), openclaw-brain (3)
+- **Memory Types:** indexed_chunk (2,031), session_transcript (457), knowledge (382), conversation_summary (561), fact (50), historical_memory (146), unknown (134), bootstrap (4), decision (1), event (3), test (3)
+- **Qdrant:** 3,772 vectors, healthy (systemd `Restart=always`)
 - **Neo4j/Graphiti:** Currently disabled (238 nodes, 532 edges from earlier runs)
 - **Federation:** 2 nodes registered
 - **API:** Healthy on port 3500
 - **MCP Server:** Available via stdio
+- **Two-Way Memory:** All 16 agents now read/write to shared memory bus
+- **Fleet Sync:** Daily automated sync at 03:00 UTC
 
 ## Known Issues & Fixes
 
@@ -153,8 +159,15 @@ memclawz/
 
 **Fix:** Batch repair script (`reattribute_memories.py`) extracted content from `metadata.memory` and backfilled the top-level `memory` field across 3,636 records. All records now have proper top-level `memory` field for search and retrieval.
 
-### Agent Tags in Stats (KNOWN)
-Direct Qdrant inserts don't populate the `agent_id` field in Mem0's expected metadata structure. The `by_agent` stats count may undercount direct inserts. Cosmetic issue — doesn't affect search or retrieval.
+### Agent Tags in Stats (FIXED 2026-03-14)
+**Problem:** Direct Qdrant inserts weren't populating the `agent_id` field in Mem0's expected metadata structure, causing `by_agent` stats to undercount direct inserts.
+
+**Fix:** Updated direct Qdrant upsert logic to include top-level `agent_id` and `memory_type` fields in the payload structure, ensuring proper agent attribution in stats and search results.
+
+### Memory Redistribution (COMPLETED 2026-03-14)
+Moved 2,882 memories out of "main" agent to proper domain agents:
+- infraclaw (1,016), cmoclaw (913), tradeclaw (553), qaclaw (182), peopleclaw (111), tradingdataclaw (54), appsclaw (37), commsclaw (31), paperclipclaw (22), devopsoci (19), coinresearchclaw (14), moneyclawx (4)
+- 763 memories retained in main (orchestration content only)
 
 ## Memory Protocol for Agents
 
