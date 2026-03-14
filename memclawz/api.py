@@ -9,8 +9,10 @@ Extends v5 with:
   - Enhanced health check
 """
 import asyncio
+import hashlib
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
@@ -96,6 +98,84 @@ def _unwrap(result):
     return []
 
 
+def _memory_agent(record: dict) -> str:
+    """Agent from nested metadata or top-level agent_id/agent (direct-insert compatibility)."""
+    meta = record.get("metadata") or {}
+    return meta.get("agent") or record.get("agent_id") or record.get("agent") or "unknown"
+
+
+def _memory_type(record: dict) -> str:
+    """Type from nested metadata or top-level memory_type/type (direct-insert compatibility)."""
+    meta = record.get("metadata") or {}
+    return meta.get("type") or record.get("memory_type") or record.get("type") or "unknown"
+
+
+def _memory_source(record: dict) -> str:
+    """Source from nested metadata or top-level source (direct-insert compatibility)."""
+    meta = record.get("metadata") or {}
+    return meta.get("source") or record.get("source") or "unknown"
+
+
+def _memory_text(record: dict) -> str:
+    """Memory text from top-level memory or data (legacy)."""
+    return record.get("memory") or record.get("data") or ""
+
+
+def _direct_qdrant_upsert(
+    content: str,
+    user_id: str,
+    agent_id: str,
+    memory_type: str,
+    metadata: dict | None = None,
+) -> dict:
+    """Write one memory directly to Qdrant with OpenAI embedding.
+    Returns {"status": "ok", "id": point_id, "method": "direct_qdrant"}.
+    Shared by /api/v1/add (primary path) and /api/v1/add-direct."""
+    import uuid
+    from openai import OpenAI
+    from qdrant_client.models import PointStruct
+    from qdrant_client import QdrantClient
+    from .config import QDRANT_HOST, QDRANT_PORT, COLLECTION_NAME
+
+    oai = OpenAI()
+    emb_resp = oai.embeddings.create(input=content, model="text-embedding-3-small")
+    vector = emb_resp.data[0].embedding
+    point_id = str(uuid.uuid4())
+    content_hash = hashlib.md5(content.encode()).hexdigest()
+    meta = metadata or {}
+    source = meta.get("source", "api")
+
+    qc = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+    payload = {
+        "memory": content,
+        "agent_id": agent_id,
+        "memory_type": memory_type,
+        "hash": content_hash,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "user_id": user_id,
+        "source": source,
+        "metadata": {"agent": agent_id, "type": memory_type, "source": source},
+    }
+    qc.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+    )
+    return {"status": "ok", "id": point_id, "method": "direct_qdrant"}
+
+
+async def _run_mem0_background(content: str, user_id: str, meta: dict, timeout_seconds: float = 90.0):
+    """Run mem.add() in a thread; log warning on failure or timeout. Does not block."""
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(mem.add, content, user_id=user_id, metadata=meta),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Mem0 extraction timed out (background); direct insert already succeeded.")
+    except Exception as e:
+        logger.warning("Mem0 extraction failed (background): %s", e)
+
+
 # --- Health ---
 
 @app.get("/health")
@@ -150,11 +230,11 @@ async def search(
     """
     results = _unwrap(mem.search(q, user_id=user_id, limit=limit))
 
-    # Post-filter by metadata
+    # Post-filter by metadata or top-level (direct-insert compatibility)
     if agent_id:
-        results = [r for r in results if r.get("metadata", {}).get("agent") == agent_id]
+        results = [r for r in results if _memory_agent(r) == agent_id]
     if memory_type:
-        results = [r for r in results if r.get("metadata", {}).get("type") == memory_type]
+        results = [r for r in results if _memory_type(r) == memory_type]
 
     # Apply composite scoring
     if use_composite:
@@ -165,14 +245,66 @@ async def search(
 
 @app.post("/api/v1/add")
 async def add_memory(req: AddMemoryRequest):
-    """Add a memory — feeds to both Qdrant (via Mem0) AND Graphiti (v6)."""
+    """Add a memory — direct Qdrant write (primary, fast), then Mem0 extraction and Graphiti in background.
+    Returns quickly; callers see success via direct_insert. Mem0/Graphiti failures only logged."""
     meta = req.metadata or {}
     meta.update({
         "agent": req.agent_id,
         "type": req.memory_type,
         "source": meta.get("source", "api"),
     })
-    result = mem.add(req.content, user_id=req.user_id, metadata=meta)
+
+    # Primary path: direct Qdrant write (fast, blocks only for embed + upsert)
+    try:
+        direct_insert = _direct_qdrant_upsert(
+            content=req.content,
+            user_id=req.user_id,
+            agent_id=req.agent_id,
+            memory_type=req.memory_type,
+            metadata=meta,
+        )
+    except Exception as e:
+        logger.warning("Direct Qdrant insert failed: %s", e)
+        direct_insert = {"status": "error", "error": str(e)}
+        raise HTTPException(status_code=503, detail=f"Direct insert failed: {e}")
+
+    # Mem0 extraction: background only; do not block the request
+    asyncio.create_task(_run_mem0_background(req.content, req.user_id, meta))
+
+    # Graphiti: non-blocking (fire-and-forget)
+    if GRAPHITI_ENABLED:
+        async def _graphiti_background():
+            try:
+                from .graphiti_layer import add_episode
+                await add_episode(
+                    content=req.content,
+                    agent_id=req.agent_id,
+                    source=meta.get("source", "api"),
+                )
+            except Exception as e:
+                logger.warning("Graphiti add failed (non-fatal): %s", e)
+        asyncio.create_task(_graphiti_background())
+
+    return {
+        "direct_insert": direct_insert,
+        "mem0": {"status": "background"},
+        "graphiti": {"status": "background"} if GRAPHITI_ENABLED else None,
+    }
+
+
+@app.post("/api/v1/add-direct")
+async def add_memory_direct(req: AddMemoryRequest):
+    """Fast-path: skip Mem0 LLM extraction, write directly to Qdrant + Graphiti.
+    Use for bootstrap/bulk writes where content is already clean facts."""
+    meta = req.metadata or {}
+    meta.setdefault("source", "api")
+    direct_insert = _direct_qdrant_upsert(
+        content=req.content,
+        user_id=req.user_id,
+        agent_id=req.agent_id,
+        memory_type=req.memory_type,
+        metadata=meta,
+    )
 
     # Feed to Graphiti (async, non-blocking)
     graphiti_result = None
@@ -180,18 +312,12 @@ async def add_memory(req: AddMemoryRequest):
         try:
             from .graphiti_layer import add_episode
             graphiti_result = await add_episode(
-                content=req.content,
-                agent_id=req.agent_id,
-                source=meta.get("source", "api"),
+                content=req.content, agent_id=req.agent_id, source=meta.get("source", "api"),
             )
         except Exception as e:
-            logger.warning(f"Graphiti add failed (non-fatal): {e}")
             graphiti_result = {"status": "error", "error": str(e)}
 
-    return {
-        "mem0": result,
-        "graphiti": graphiti_result,
-    }
+    return {"status": "ok", "id": direct_insert["id"], "method": "direct_qdrant", "graphiti": graphiti_result}
 
 
 @app.get("/api/v1/memories")
@@ -204,7 +330,7 @@ async def list_memories(
     """List all memories, optionally filtered by agent."""
     all_mems = _unwrap(mem.get_all(user_id=user_id, limit=10000))
     if agent_id:
-        all_mems = [m for m in all_mems if m.get("metadata", {}).get("agent") == agent_id]
+        all_mems = [m for m in all_mems if _memory_agent(m) == agent_id]
     return {
         "memories": all_mems[offset : offset + limit],
         "total": len(all_mems),
@@ -217,11 +343,11 @@ async def list_agents():
     all_mems = _unwrap(mem.get_all(user_id="yoni", limit=10000))
     agents: dict = {}
     for m in all_mems:
-        agent = m.get("metadata", {}).get("agent", "unknown")
+        agent = _memory_agent(m)
         if agent not in agents:
             agents[agent] = {"count": 0, "types": {}}
         agents[agent]["count"] += 1
-        mtype = m.get("metadata", {}).get("type", "unknown")
+        mtype = _memory_type(m)
         agents[agent]["types"][mtype] = agents[agent]["types"].get(mtype, 0) + 1
     return agents
 
@@ -234,10 +360,9 @@ async def stats():
     agents: dict = {}
     sources: dict = {}
     for m in all_mems:
-        meta = m.get("metadata", {})
-        t = meta.get("type", "unknown")
-        a = meta.get("agent", "unknown")
-        s = meta.get("source", "unknown")
+        t = _memory_type(m)
+        a = _memory_agent(m)
+        s = _memory_source(m)
         types[t] = types.get(t, 0) + 1
         agents[a] = agents.get(a, 0) + 1
         sources[s] = sources.get(s, 0) + 1
