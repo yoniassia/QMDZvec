@@ -26,6 +26,7 @@ def _load_key(env_var: str, file_name: str | None = None) -> str:
 
 OPENAI_API_KEY = _load_key("OPENAI_API_KEY", "openai-api-key.txt")
 ANTHROPIC_API_KEY = _load_key("ANTHROPIC_API_KEY", "anthropic-api-key.txt")
+GOOGLE_API_KEY = _load_key("GOOGLE_API_KEY", "google-api-key.txt")
 
 # Qdrant
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
@@ -63,6 +64,9 @@ COMPACTION_INTERVAL = int(os.getenv("COMPACTION_INTERVAL", "1800"))  # 30 min
 # Federation (v6)
 FEDERATION_ENABLED = os.getenv("FEDERATION_ENABLED", "true").lower() in ("true", "1", "yes")
 FEDERATION_ROLE = os.getenv("FEDERATION_ROLE", "master")  # master or node
+
+# Enrichment (v7)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 # Mem0 config
 MEM0_CONFIG = {

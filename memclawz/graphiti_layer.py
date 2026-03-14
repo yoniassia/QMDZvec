@@ -56,6 +56,7 @@ async def add_episode(
     source: str = "api",
     timestamp: datetime | None = None,
     group_id: str = "yoniclaw",
+    triples: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Add a conversation episode to the temporal knowledge graph.
 
@@ -68,6 +69,7 @@ async def add_episode(
         source: Source identifier (api, lcm, compaction, etc.).
         timestamp: When this episode occurred (defaults to now).
         group_id: Group/namespace for the episode.
+        triples: Optional pre-extracted RDF triples to also store.
 
     Returns:
         Dict with episode details and extracted entities/edges.
@@ -84,15 +86,83 @@ async def add_episode(
             reference_time=ts,
             group_id=group_id,
         )
-        logger.info(f"Graphiti episode added: agent={agent_id}, source={source}")
+        
+        # v7: Also add extracted triples if provided
+        triples_added = 0
+        if triples:
+            triples_added = await _add_triples_to_graphiti(g, triples, group_id, ts)
+        
+        logger.info(f"Graphiti episode added: agent={agent_id}, source={source}, triples={triples_added}")
         return {
             "status": "ok",
             "episode_name": f"{agent_id}:{source}:{ts.isoformat()[:19]}",
             "result": str(result) if result else "added",
+            "triples_added": triples_added,
         }
     except Exception as e:
         logger.error(f"Graphiti add_episode error: {e}")
         return {"status": "error", "error": str(e)}
+
+
+async def _add_triples_to_graphiti(
+    g: Graphiti,
+    triples: list[dict],
+    group_id: str,
+    timestamp: datetime
+) -> int:
+    """Add RDF triples directly to Neo4j via Graphiti's driver.
+    
+    Returns count of triples successfully added.
+    """
+    if not triples:
+        return 0
+        
+    try:
+        driver = g.driver
+        added_count = 0
+        
+        async with driver.session() as session:
+            for triple in triples:
+                try:
+                    subject = triple.get("subject", "").strip()
+                    predicate = triple.get("predicate", "").strip()
+                    obj = triple.get("object", "").strip()
+                    
+                    if not (subject and predicate and obj):
+                        continue
+                    
+                    # Create or merge nodes and relationships
+                    query = """
+                    MERGE (s:Entity {name: $subject, group_id: $group_id})
+                    ON CREATE SET s.created_at = $timestamp, s.uuid = randomUUID()
+                    MERGE (o:Entity {name: $object, group_id: $group_id})
+                    ON CREATE SET o.created_at = $timestamp, o.uuid = randomUUID()
+                    MERGE (s)-[r:RELATES_TO {
+                        predicate: $predicate,
+                        group_id: $group_id,
+                        created_at: $timestamp,
+                        source: "memclawz_triples"
+                    }]->(o)
+                    RETURN s, r, o
+                    """
+                    
+                    await session.run(query, {
+                        "subject": subject,
+                        "object": obj,
+                        "predicate": predicate,
+                        "group_id": group_id,
+                        "timestamp": timestamp.isoformat()
+                    })
+                    added_count += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to add triple {triple}: {e}")
+                    
+        return added_count
+        
+    except Exception as e:
+        logger.error(f"Failed to add triples to Graphiti: {e}")
+        return 0
 
 
 async def search(

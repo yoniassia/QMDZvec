@@ -1,4 +1,4 @@
-# MemClawz v6 API Reference
+# MemClawz v7 API Reference
 
 Base URL: `http://localhost:3500`
 

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 # Base importance by memory type
 TYPE_BOOST = {
+    # Existing v6 types
     "decision": 1.0,
     "preference": 0.95,
     "relationship": 0.9,
@@ -15,10 +16,17 @@ TYPE_BOOST = {
     "procedure": 0.85,
     "fact": 0.8,
     "event": 0.7,
+    # New v7 types (action cycle)
+    "intention": 0.75,    # agent intends to do something
+    "plan": 0.85,         # structured plan/spec
+    "commitment": 0.9,    # promised to do something
+    "action": 0.8,        # action taken
+    "outcome": 0.85,      # result of an action
+    "cancellation": 0.6,  # something was cancelled
 }
 
 # Types that resist decay (floor at 40%)
-PERSISTENT_TYPES = {"decision", "preference", "relationship"}
+PERSISTENT_TYPES = {"decision", "preference", "relationship", "commitment"}
 
 # Default tuning parameters
 DEFAULT_WEIGHTS = {
@@ -86,15 +94,24 @@ def score_results(results: list[dict], query_similarity_key: str = "score") -> l
     """Re-score a list of Mem0/Qdrant search results using composite scoring.
 
     Adds 'composite_score' to each result and returns sorted by it (descending).
+    v7: Uses enriched importance weight from auto-enrichment layer.
     """
     scored = []
     for r in results:
         meta = r.get("metadata", {})
         sim = r.get(query_similarity_key, 0.5)
+        
+        # v7: Use enriched importance (fallback to top-level, then default)
+        importance = (
+            meta.get("importance") or 
+            r.get("importance") or 
+            0.8
+        )
+        
         cs = composite_score(
             semantic_similarity=sim,
             created_at=meta.get("extracted_at", meta.get("created_at", meta.get("date"))),
-            importance=meta.get("importance", 0.8),
+            importance=importance,
             access_count=meta.get("access_count", 0),
             memory_type=meta.get("type", "fact"),
         )

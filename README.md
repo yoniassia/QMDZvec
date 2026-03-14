@@ -1,31 +1,44 @@
-# MemClawz v6 🧠
+# MemClawz v7 🧠
 
-AI Agent Fleet Memory System — composite scoring, compaction engine, Graphiti temporal knowledge graph, multi-claw federation, sleep-time reflection, MCP server.
+AI Agent Fleet Memory System — auto-enrichment, hybrid search, memory lifecycle, Paperclip integration, composite scoring, compaction engine, Graphiti temporal knowledge graph, multi-claw federation, sleep-time reflection, MCP server.
 
-## What's New in v6
+## What's New in v7
 
-- **Composite Scoring** — Weighted blend of semantic similarity + recency decay + importance + access frequency (replaces raw cosine)
+- **Auto-Enrichment Layer** — Automatic metadata extraction (entities, categories, temporal markers, importance scoring) on every memory write
+- **Hybrid Search** — BM25 keyword scoring alongside vector search for improved relevance (pure Python, no external deps)
+- **Memory Lifecycle** — 8-state status management (active → verified → archived → deprecated → superseded → merged → disputed → deleted) with transition validation
+- **Expanded Memory Types** — 15 types: decision, event, fact, procedure, insight, preference, relationship, goal, constraint, hypothesis, observation, question, answer, correction, meta
+- **Paperclip Integration** — `plugin-memclawz` for agent orchestrator: auto-context injection before spawn, memory-aware routing, post-task writeback
+- **v7 API Extensions** — `/api/v1/lifecycle/*`, `/api/v1/hybrid-search`, `/api/v1/enrich` endpoints
+
+## What's in v6
+
+- **Composite Scoring** — Weighted blend of semantic similarity + recency decay + importance + access frequency
 - **Compaction Engine** — Three-tier: session compactor, daily digest, weekly merge with deduplication
-- **Graphiti Integration** — Neo4j temporal knowledge graph for entity relationships, contradiction detection, temporal fact management
-- **Multi-Claw Federation** — HTTP push/pull protocol for sharing memories across fleet (YoniClaw master + remote nodes)
-- **Sleep-Time Reflection** — LLM-driven pattern detection, insight generation, and MEMORY.md update proposals
-- **Enhanced MCP Server** — New tools: compact_session, reflect, memory_stats
+- **Graphiti Integration** — Neo4j temporal knowledge graph for entity relationships, contradiction detection
+- **Multi-Claw Federation** — HTTP push/pull protocol for sharing memories across fleet
+- **Sleep-Time Reflection** — LLM-driven pattern detection, insight generation, MEMORY.md update proposals
+- **Enhanced MCP Server** — Tools: compact_session, reflect, memory_stats
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              MemClawz v6 Master (YoniClaw)       │
-│                                                   │
-│  FastAPI :3500  │  Qdrant :6333  │  Neo4j :7687  │
-│                                                   │
-│  Mem0 + Composite Scoring + Graphiti              │
-│  Compaction: Session │ Daily │ Weekly             │
-│  Reflection Engine                                │
-│  Federation: register / push / pull / sync        │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                MemClawz v7 Master (YoniClaw)                │
+│                                                             │
+│  FastAPI :3500  │  Qdrant :6333  │  Neo4j :7687             │
+│                                                             │
+│  Enrichment → Hybrid Search → Lifecycle                     │
+│  Mem0 + Composite Scoring + Graphiti                        │
+│  Compaction: Session │ Daily │ Weekly                       │
+│  Reflection Engine │ Federation                             │
+│                                                             │
+│  Paperclip Plugin: context injection + routing + writeback  │
+└─────────────────────────────────────────────────────────────┘
          ▲              ▲              ▲
     Clawdet         MoneyClaw      WhiteRabbit
+         ▲
+      OCI ARM
 ```
 
 ## Quick Start
@@ -47,16 +60,30 @@ systemctl --user start memclawz-cron
 
 ## API Endpoints
 
-### Core (v5 compatible)
+### Core
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (Qdrant, Neo4j, Federation) |
 | GET | `/api/v1/search?q=...` | Semantic search with composite scoring |
-| POST | `/api/v1/add` | Add memory (direct Qdrant + background Mem0 + Graphiti) |
-| POST | `/api/v1/add-direct` | Fast-path: skip Mem0 extraction, direct Qdrant + Graphiti |
+| POST | `/api/v1/add` | Add memory (direct Qdrant + background Mem0 + Graphiti + auto-enrichment) |
+| POST | `/api/v1/add-direct` | Fast-path: skip Mem0, direct Qdrant + Graphiti |
 | GET | `/api/v1/memories` | List memories |
 | GET | `/api/v1/agents` | List agents with counts |
 | GET | `/api/v1/stats` | System statistics |
+
+### v7: Enrichment & Hybrid Search
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/enrich` | Auto-enrich a memory with metadata extraction |
+| GET | `/api/v1/hybrid-search?q=...` | Combined BM25 + vector search |
+
+### v7: Memory Lifecycle
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/lifecycle/transition` | Transition memory to new state |
+| GET | `/api/v1/lifecycle/status/{id}` | Get memory lifecycle status |
+| POST | `/api/v1/lifecycle/archive-stale` | Archive memories older than threshold |
+| POST | `/api/v1/lifecycle/supersede` | Mark memory as superseded by another |
 
 ### Graph (v6)
 | Method | Endpoint | Description |
@@ -86,6 +113,21 @@ systemctl --user start memclawz-cron
 | POST | `/api/v1/federation/sync` | Bidirectional sync |
 | GET | `/api/v1/federation/status` | Federation health |
 
+## Paperclip Integration (v7)
+
+MemClawz integrates with Paperclip (Agent Orchestrator) via `plugin-memclawz`:
+
+### Auto-Context Injection
+Before spawning any agent session, the plugin searches MemClawz for the top 5 relevant memories and prepends them to the prompt as a `## Relevant Memory Context` section. 3s timeout, graceful fallback.
+
+### Memory-Aware Routing
+`scoreAgentsByMemory(task, agentIds[])` scores each agent by how many relevant memories they have for a given task. Used for intelligent agent selection.
+
+### Post-Task Writeback
+On `session_complete`, `session_error`, `pr_merged`, `ci_failed`, `changes_requested`, and `review_requested` events, the plugin auto-writes a summary to MemClawz via `/api/v1/add-direct`. 5s timeout, fire-and-forget.
+
+**Plugin location:** `packages/plugins/notifier-memclawz/` in the Paperclip monorepo.
+
 ## Composite Scoring
 
 ```
@@ -98,14 +140,65 @@ score = (w_semantic × similarity + w_recency × decay + w_importance × weight)
 - **Access boost**: up to 1.5× for frequently accessed memories
 - **Persistent types** (decisions, preferences, relationships): minimum 40% recency floor
 
+## Hybrid Search (v7)
+
+Combines BM25 keyword scoring with vector similarity for better recall:
+
+```
+final_score = α × vector_score + (1 - α) × bm25_score
+```
+
+Default α = 0.7 (70% semantic, 30% keyword). Useful for exact term matches that pure vector search might miss (agent IDs, error codes, port numbers, file paths).
+
+## Memory Lifecycle (v7)
+
+Eight states with validated transitions:
+
+```
+active → verified → archived
+  ↓         ↓         ↓
+deprecated  merged   deleted
+  ↓
+superseded
+  ↓
+disputed
+```
+
+- **active**: Default state for new memories
+- **verified**: Confirmed by human or cross-reference
+- **archived**: No longer actively relevant but preserved
+- **deprecated**: Outdated, newer info exists
+- **superseded**: Replaced by a specific newer memory (linked)
+- **merged**: Combined into another memory during compaction
+- **disputed**: Conflicting information detected
+- **deleted**: Soft-deleted, excluded from search
+
+Auto-archival via `POST /api/v1/lifecycle/archive-stale` for memories older than configurable threshold.
+
+## Auto-Enrichment (v7)
+
+Every memory written via `/api/v1/add` is automatically enriched with:
+
+- **Entities**: Extracted names, agent IDs, server IPs, domains, file paths
+- **Categories**: Infrastructure, trading, research, people, crypto, etc.
+- **Temporal markers**: Dates, relative time references
+- **Importance score**: 0.0–1.0 based on content analysis
+- **Content hash**: For deduplication
+
+Enrichment is non-blocking (runs async after write confirmation).
+
 ## Project Structure
 
 ```
 memclawz/
 ├── __init__.py
-├── config.py           # All configuration (Qdrant, Neo4j, Federation, etc.)
-├── api.py              # FastAPI REST API (v6 endpoints)
+├── config.py           # All configuration
+├── api.py              # FastAPI REST API
 ├── scoring.py          # Composite relevance scoring
+├── enrichment.py       # v7: Auto-enrichment layer
+├── hybrid_search.py    # v7: BM25 + vector hybrid search
+├── lifecycle.py        # v7: Memory status lifecycle
+├── v7_extensions.py    # v7: API integration helpers
 ├── compactor.py        # Session/daily/weekly compaction
 ├── graphiti_layer.py   # Neo4j + Graphiti temporal graph
 ├── federation.py       # Multi-claw federation protocol
@@ -113,9 +206,9 @@ memclawz/
 ├── watcher.py          # LCM → Mem0 → Qdrant + Graphiti pipeline
 ├── compaction_cron.py  # Automated compaction scheduler
 ├── classifier.py       # Memory type classification
-├── contradiction.py    # Contradiction detection (+ Graphiti)
-├── decay.py            # Legacy decay (kept for compatibility)
-├── mcp_server.py       # MCP STDIO server (v6 tools)
+├── contradiction.py    # Contradiction detection
+├── decay.py            # Legacy decay (compatibility)
+├── mcp_server.py       # MCP STDIO server
 ├── importer.py         # Bulk import utilities
 └── utils.py            # Shared utilities
 ```
@@ -131,47 +224,40 @@ memclawz/
 | Neo4j | 7474/7687 | Graph database |
 | Qdrant | 6333 | Vector database |
 
-## Current Status (March 2026)
+## Current Status (March 14, 2026)
 
-- **Version:** v6.0.0 (ClawHub: memclawz@6.0.1)
-- **Total Memories:** 3,772 across 16 agents
-- **Agent Distribution:** main (2,826), peopleclaw (257), infraclaw (73), appsclaw (73), tradeclaw (84), qaclaw (118), tradingdataclaw (17), commsclaw (64), moneyclawx (72), cmoclaw (45), devopsoci (32), coinresearchclaw (58), quantclaw (30), paperclipclaw (10), coinsclaw (10), openclaw-brain (3)
-- **Memory Types:** indexed_chunk (2,031), session_transcript (457), knowledge (382), conversation_summary (561), fact (50), historical_memory (146), unknown (134), bootstrap (4), decision (1), event (3), test (3)
-- **Qdrant:** 3,772 vectors, healthy (systemd `Restart=always`)
-- **Neo4j/Graphiti:** Currently disabled (238 nodes, 532 edges from earlier runs)
-- **Federation:** 2 nodes registered
-- **API:** Healthy on port 3500
-- **MCP Server:** Available via stdio
-- **Two-Way Memory:** All 16 agents now read/write to shared memory bus
-- **Fleet Sync:** Daily automated sync at 03:00 UTC
+- **Version:** v7.0.0
+- **Total Memories:** 3,774 across 16 agents
+- **Fleet:** 5 servers (YoniClaw, White Rabbit, Clawdet, MoneyClaw, OCI ARM)
+- **Agents:** 21 registered in Paperclip, 16 with active memories
+- **Qdrant:** Healthy (systemd `Restart=always`)
+- **Neo4j/Graphiti:** 238 nodes, 532 edges
+- **Federation:** 2 nodes registered, daily sync at 03:00 UTC
+- **Paperclip Plugin:** Live on White Rabbit (context injection + writeback)
+- **Two-Way Memory:** All agents read/write to shared memory bus
 
-## Known Issues & Fixes
+## Changelog
 
-### Mem0 `add()` Returns Empty (FIXED 2026-03-14)
-**Problem:** Mem0 uses an LLM extraction pipeline that rejects already-clean/pre-formatted text as having "nothing to extract." Calling `mem.add()` returns `results: []` for structured facts.
+### v7.0.0 (2026-03-14)
+- Auto-enrichment layer (entities, categories, temporal markers, importance)
+- Hybrid search (BM25 + vector)
+- Memory lifecycle management (8 states, transition validation)
+- Expanded memory types (15 types)
+- Paperclip `plugin-memclawz` integration (context injection, routing, writeback)
+- Prompt-builder MemClawz context injection in Paperclip core
+- Agent memory scoring for routing decisions
 
-**Fix:** Added direct Qdrant upsert fallback in `/api/v1/add` endpoint. When `mem.add()` returns empty results, the API generates OpenAI embeddings and upserts directly to Qdrant with proper payload structure (`memory`, `hash`, `user_id`, `created_at`, plus flattened `agent`, `type`, `source`).
-
-**File:** `memclawz/api.py` — search for `direct_qdrant` fallback logic.
-
-### Empty `memory` Field in 3,636 Records (FIXED 2026-03-14)
-**Problem:** Early direct Qdrant inserts stored content only in nested `metadata.memory` but left the top-level `memory` field empty. This caused search results to return records with `"memory": ""`.
-
-**Fix:** Batch repair script (`reattribute_memories.py`) extracted content from `metadata.memory` and backfilled the top-level `memory` field across 3,636 records. All records now have proper top-level `memory` field for search and retrieval.
-
-### Agent Tags in Stats (FIXED 2026-03-14)
-**Problem:** Direct Qdrant inserts weren't populating the `agent_id` field in Mem0's expected metadata structure, causing `by_agent` stats to undercount direct inserts.
-
-**Fix:** Updated direct Qdrant upsert logic to include top-level `agent_id` and `memory_type` fields in the payload structure, ensuring proper agent attribution in stats and search results.
-
-### Memory Redistribution (COMPLETED 2026-03-14)
-Moved 2,882 memories out of "main" agent to proper domain agents:
-- infraclaw (1,016), cmoclaw (913), tradeclaw (553), qaclaw (182), peopleclaw (111), tradingdataclaw (54), appsclaw (37), commsclaw (31), paperclipclaw (22), devopsoci (19), coinresearchclaw (14), moneyclawx (4)
-- 763 memories retained in main (orchestration content only)
+### v6.0.0 (2026-03-13)
+- Composite scoring (semantic × recency × importance × access)
+- 3-tier compaction engine
+- Graphiti/Neo4j temporal knowledge graph
+- Multi-claw federation protocol
+- Sleep-time reflection engine
+- Direct Qdrant write path (fix for Mem0 empty extraction)
+- Memory redistribution (2,882 memories to domain agents)
+- Record repair (3,636 malformed records fixed)
 
 ## Memory Protocol for Agents
-
-Agents writing to MemClawz should use the `/api/v1/add` endpoint:
 
 ```bash
 curl -X POST http://localhost:3500/api/v1/add \
@@ -183,12 +269,7 @@ curl -X POST http://localhost:3500/api/v1/add \
   }'
 ```
 
-**Memory types:**
-- `decision` — Choices made (architecture, tools, approach)
-- `event` — What happened (deployed X, fixed Y)
-- `fact` — Discovered information (endpoints, versions, pricing)
-- `procedure` — How something was done (deploy steps, build process)
-- `insight` — Lessons learned (what worked, what didn't)
+**Memory types (v7):** decision, event, fact, procedure, insight, preference, relationship, goal, constraint, hypothesis, observation, question, answer, correction, meta
 
 **Canonical memory order:** Local files first → MemClawz second → LCM third.
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "memclawz"
-version = "6.0.0"
+version = "7.0.0"
 description = "AI agent fleet memory system — composite scoring, compaction engine, Graphiti temporal graph, multi-claw federation, sleep-time reflection, MCP server"
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "graphiti-core>=0.28.0",
     "neo4j>=5.0.0",
+    "google-generativeai>=0.8.0",
 ]
 
 [project.scripts]

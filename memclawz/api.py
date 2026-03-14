@@ -1,12 +1,13 @@
-"""MemClawz v6 — Shared Memory Bus (REST API).
+"""MemClawz v7 — Shared Memory Bus (REST API).
 
-Extends v5 with:
-  - Composite scoring for search
-  - Graphiti temporal graph integration
-  - Session/daily/weekly compaction endpoints
-  - Multi-claw federation endpoints
-  - Reflection endpoint
-  - Enhanced health check
+Extends v6 with:
+  - Auto-enrichment layer (Phase 1)
+  - Temporal validity tracking (Phase 2)  
+  - RDF-lite triples extraction (Phase 3)
+  - Status lifecycle: 8-state memory lifecycle (Phase 4)
+  - Hybrid search: BM25 + vector + lifecycle scoring (Phase 5)
+  - Expanded memory types: 12 types covering full action cycle (Phase 6)
+  - Google Gemini integration with OpenAI fallback
 """
 import asyncio
 import hashlib
@@ -21,6 +22,15 @@ from mem0 import Memory
 from .config import MEM0_CONFIG, API_HOST, API_PORT, GRAPHITI_ENABLED, FEDERATION_ENABLED
 from .scoring import score_results
 from .router import MemClawzRouter
+from .v7_extensions import (
+    apply_lifecycle_filter,
+    apply_hybrid_scoring,
+    enhance_memory_with_lifecycle,
+    process_search_v7,
+    get_v7_stats,
+    transition_memory_status,
+    bulk_update_outdated,
+)
 from .federation import (
     NodeRegistration,
     FederationPushRequest,
@@ -54,7 +64,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="MemClawz v6 API", version="6.0.0", lifespan=lifespan)
+app = FastAPI(title="MemClawz v7 API", version="7.0.0", lifespan=lifespan)
 
 # Initialize Mem0
 mem = Memory.from_config(MEM0_CONFIG)
@@ -128,14 +138,38 @@ def _direct_qdrant_upsert(
     memory_type: str,
     metadata: dict | None = None,
 ) -> dict:
-    """Write one memory directly to Qdrant with OpenAI embedding.
-    Returns {"status": "ok", "id": point_id, "method": "direct_qdrant"}.
+    """Write one memory directly to Qdrant with OpenAI embedding and v7 enrichment.
+    Returns {"status": "ok", "id": point_id, "method": "direct_qdrant", "enrichment": enrichment_data}.
     Shared by /api/v1/add (primary path) and /api/v1/add-direct."""
     import uuid
     from openai import OpenAI
     from qdrant_client.models import PointStruct
     from qdrant_client import QdrantClient
     from .config import QDRANT_HOST, QDRANT_PORT, COLLECTION_NAME
+    from .enrichment import enrich_memory, compute_validity_end
+
+    # Phase 1: Auto-enrichment (with graceful fallback)
+    try:
+        enrichment = enrich_memory(content)
+        logger.info(f"Memory enriched: type={enrichment['type']}, weight={enrichment['weight']}")
+    except Exception as e:
+        logger.warning(f"Enrichment failed, using defaults: {e}")
+        enrichment = {
+            "type": memory_type,  # Keep user-specified type
+            "weight": 0.5,
+            "title": content[:50],
+            "summary": content[:200], 
+            "tags": [],
+            "validity_hours": None,
+            "triples": []
+        }
+
+    # Keep user-specified type as override (don't overwrite explicit agent choices)
+    enriched_type = memory_type if memory_type != "fact" else enrichment["type"]
+    
+    # Phase 2: Temporal validity
+    ts_valid_start = datetime.now(timezone.utc).isoformat()
+    ts_valid_end = compute_validity_end(enrichment["validity_hours"])
 
     oai = OpenAI()
     emb_resp = oai.embeddings.create(input=content, model="text-embedding-3-small")
@@ -149,18 +183,47 @@ def _direct_qdrant_upsert(
     payload = {
         "memory": content,
         "agent_id": agent_id,
-        "memory_type": memory_type,
+        "memory_type": enriched_type,
         "hash": content_hash,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
         "source": source,
-        "metadata": {"agent": agent_id, "type": memory_type, "source": source},
+        # v7: Enhanced metadata with enrichment + temporal validity + triples
+        "metadata": {
+            "agent": agent_id, 
+            "type": enriched_type, 
+            "source": source,
+            # Enrichment data
+            "importance": enrichment["weight"],
+            "title": enrichment["title"],
+            "summary": enrichment["summary"], 
+            "tags": enrichment["tags"],
+            # Temporal validity
+            "ts_valid_start": ts_valid_start,
+            "ts_valid_end": ts_valid_end,
+            # Phase 3: RDF triples
+            "triples": enrichment["triples"]
+        },
+        # Top-level for compatibility
+        "importance": enrichment["weight"],
+        "ts_valid_start": ts_valid_start,
+        "ts_valid_end": ts_valid_end,
+        "triples": enrichment["triples"],
+        # Phase 4: Lifecycle status
+        "status": "active",
+        "status_updated_at": datetime.now(timezone.utc).isoformat(),
     }
     qc.upsert(
         collection_name=COLLECTION_NAME,
         points=[PointStruct(id=point_id, vector=vector, payload=payload)],
     )
-    return {"status": "ok", "id": point_id, "method": "direct_qdrant"}
+    return {
+        "status": "ok", 
+        "id": point_id, 
+        "method": "direct_qdrant",
+        "enrichment": enrichment,
+        "validity": {"start": ts_valid_start, "end": ts_valid_end}
+    }
 
 
 async def _run_mem0_background(content: str, user_id: str, meta: dict, timeout_seconds: float = 90.0):
@@ -183,7 +246,7 @@ async def health():
     """Enhanced health check including Neo4j and federation status."""
     health_data = {
         "status": "ok",
-        "version": "6.0.0",
+        "version": "7.0.0",
         "qdrant": "ok",
         "neo4j": "disabled",
         "graphiti": "disabled",
@@ -223,11 +286,19 @@ async def search(
     memory_type: str | None = None,
     limit: int = Query(default=20, le=100),
     use_composite: bool = True,
+    include_expired: bool = False,
+    use_hybrid: bool = True,
+    include_deleted: bool = False,
 ):
-    """Semantic search with composite scoring (v6).
+    """Semantic search with composite scoring, hybrid BM25, lifecycle filtering, and temporal validity (v7).
 
     Set use_composite=false to get raw cosine similarity (v5 behavior).
+    Set include_expired=true to include expired memories.
+    Set use_hybrid=true (default) for BM25 + vector hybrid scoring.
+    Set include_deleted=true to include deleted/superseded memories.
     """
+    from .enrichment import is_memory_expired
+    
     results = _unwrap(mem.search(q, user_id=user_id, limit=limit))
 
     # Post-filter by metadata or top-level (direct-insert compatibility)
@@ -236,11 +307,45 @@ async def search(
     if memory_type:
         results = [r for r in results if _memory_type(r) == memory_type]
 
+    # Phase 2: Filter expired memories unless explicitly requested
+    if not include_expired:
+        filtered_results = []
+        for r in results:
+            meta = r.get("metadata", {})
+            ts_valid_end = meta.get("ts_valid_end") or r.get("ts_valid_end")
+            if not is_memory_expired(ts_valid_end):
+                filtered_results.append(r)
+            else:
+                r["expired"] = True
+        results = filtered_results
+
+    # Phase 4: Lifecycle filtering (exclude deleted/superseded by default)
+    results = apply_lifecycle_filter(results, include_deleted=include_deleted)
+
     # Apply composite scoring
     if use_composite:
         results = score_results(results)
 
-    return {"results": results, "count": len(results), "scoring": "composite" if use_composite else "cosine"}
+    # Phase 5: Hybrid BM25 + vector scoring
+    if use_hybrid:
+        results = apply_hybrid_scoring(query=q, results=results, top_k=limit)
+
+    # Add validity info to each result
+    for r in results:
+        meta = r.get("metadata", {})
+        r["validity"] = {
+            "start": meta.get("ts_valid_start") or r.get("ts_valid_start"),
+            "end": meta.get("ts_valid_end") or r.get("ts_valid_end"),
+            "expired": is_memory_expired(meta.get("ts_valid_end") or r.get("ts_valid_end"))
+        }
+
+    return {
+        "results": results, 
+        "count": len(results), 
+        "scoring": "hybrid" if use_hybrid else ("composite" if use_composite else "cosine"),
+        "included_expired": include_expired,
+        "included_deleted": include_deleted,
+    }
 
 
 @app.post("/api/v1/add")
@@ -271,15 +376,18 @@ async def add_memory(req: AddMemoryRequest):
     # Mem0 extraction: background only; do not block the request
     asyncio.create_task(_run_mem0_background(req.content, req.user_id, meta))
 
-    # Graphiti: non-blocking (fire-and-forget)
+    # Graphiti: non-blocking (fire-and-forget) with v7 triples support
     if GRAPHITI_ENABLED:
         async def _graphiti_background():
             try:
                 from .graphiti_layer import add_episode
+                # Extract triples from direct_insert enrichment result
+                triples = direct_insert.get("enrichment", {}).get("triples", [])
                 await add_episode(
                     content=req.content,
                     agent_id=req.agent_id,
                     source=meta.get("source", "api"),
+                    triples=triples,
                 )
             except Exception as e:
                 logger.warning("Graphiti add failed (non-fatal): %s", e)
@@ -545,6 +653,32 @@ async def fed_status():
     if not FEDERATION_ENABLED:
         raise HTTPException(status_code=503, detail="Federation not enabled")
     return federation_status()
+
+
+# --- v7 Lifecycle & Stats Endpoints ---
+
+@app.get("/api/v1/v7/stats")
+async def v7_stats():
+    """Get v7 feature statistics — lifecycle, hybrid search, expanded types."""
+    return get_v7_stats()
+
+
+@app.post("/api/v1/memory/{memory_id}/transition")
+async def memory_transition(memory_id: str, from_status: str, to_status: str):
+    """Transition a memory's lifecycle status.
+    
+    Valid states: active, confirmed, outdated, archived, contradicted, merged, superseded, deleted
+    """
+    result = transition_memory_status(memory_id, from_status, to_status)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.post("/api/v1/lifecycle/bulk-outdated")
+async def lifecycle_bulk_outdated(threshold_days: int = Query(default=30, ge=1)):
+    """Find and mark memories older than threshold_days as outdated."""
+    return bulk_update_outdated(threshold_days)
 
 
 def main():
