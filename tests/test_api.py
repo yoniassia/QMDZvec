@@ -16,7 +16,7 @@ def test_health_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
-    assert data["version"] == "6.0.0"
+    assert data["version"] == "7.0.0"
 
 
 def test_add_direct_path_payload_has_required_top_level_fields():

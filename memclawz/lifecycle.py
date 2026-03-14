@@ -95,14 +95,15 @@ class MemoryLifecycle:
                 updated_payload["lifecycle_metadata"] = updated_payload.get("lifecycle_metadata", {})
                 updated_payload["lifecycle_metadata"]["transition_timestamp"] = datetime.now(timezone.utc).isoformat()
             
-            # Update in Qdrant
-            self.qc.upsert(
+            # Update payload in Qdrant (use set_payload to avoid needing the vector)
+            self.qc.set_payload(
                 collection_name=COLLECTION_NAME,
-                points=[PointStruct(
-                    id=memory_id,
-                    vector=result[0].vector,
-                    payload=updated_payload
-                )]
+                payload={
+                    "status": to_status,
+                    "status_updated_at": updated_payload["status_updated_at"],
+                    **({"lifecycle_metadata": updated_payload["lifecycle_metadata"]} if "lifecycle_metadata" in updated_payload else {})
+                },
+                points=[memory_id]
             )
             
             logger.info(f"Memory {memory_id} transitioned: {from_status} -> {to_status}")
@@ -235,20 +236,11 @@ class MemoryLifecycle:
                 return False
             
             # Add supersession link metadata to old memory
-            result = self.qc.retrieve(collection_name=COLLECTION_NAME, ids=[old_id])
-            if result:
-                updated_payload = result[0].payload.copy()
-                updated_payload["lifecycle_metadata"] = updated_payload.get("lifecycle_metadata", {})
-                updated_payload["lifecycle_metadata"]["superseded_by"] = new_id
-                
-                self.qc.upsert(
-                    collection_name=COLLECTION_NAME,
-                    points=[PointStruct(
-                        id=old_id,
-                        vector=result[0].vector,
-                        payload=updated_payload
-                    )]
-                )
+            self.qc.set_payload(
+                collection_name=COLLECTION_NAME,
+                payload={"lifecycle_metadata": {"superseded_by": new_id}},
+                points=[old_id]
+            )
             
             logger.info(f"Memory {old_id} superseded by {new_id}")
             return True
@@ -275,20 +267,11 @@ class MemoryLifecycle:
                 return False
             
             # Add contradiction link metadata
-            result = self.qc.retrieve(collection_name=COLLECTION_NAME, ids=[memory_id])
-            if result:
-                updated_payload = result[0].payload.copy()
-                updated_payload["lifecycle_metadata"] = updated_payload.get("lifecycle_metadata", {})
-                updated_payload["lifecycle_metadata"]["contradicted_by"] = contradicting_id
-                
-                self.qc.upsert(
-                    collection_name=COLLECTION_NAME,
-                    points=[PointStruct(
-                        id=memory_id,
-                        vector=result[0].vector,
-                        payload=updated_payload
-                    )]
-                )
+            self.qc.set_payload(
+                collection_name=COLLECTION_NAME,
+                payload={"lifecycle_metadata": {"contradicted_by": contradicting_id}},
+                points=[memory_id]
+            )
             
             logger.info(f"Memory {memory_id} contradicted by {contradicting_id}")
             return True
