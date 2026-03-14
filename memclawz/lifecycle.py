@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, Filter, FieldCondition, Range, MatchValue
+from qdrant_client.models import PointStruct, Filter, FieldCondition, MatchValue
 from .config import QDRANT_HOST, QDRANT_PORT, COLLECTION_NAME
 
 logger = logging.getLogger(__name__)
@@ -148,19 +148,15 @@ class MemoryLifecycle:
             List of memory dicts with id, content, age_days, current_status
         """
         threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)
-        threshold_iso = threshold_date.isoformat()
         
         try:
-            # Search for active memories older than threshold
+            # Search for active memories, then filter by age in Python
+            # (created_at is stored as ISO string, not numeric, so Range filter won't work)
             filter_conditions = Filter(
                 must=[
                     FieldCondition(
                         key="status",
                         match=MatchValue(value="active")
-                    ),
-                    FieldCondition(
-                        key="created_at",
-                        range=Range(lt=threshold_iso)
                     )
                 ]
             )
@@ -181,9 +177,13 @@ class MemoryLifecycle:
                 if created_str:
                     try:
                         created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                        age_days = (datetime.now(timezone.utc) - created_dt.replace(
+                        created_dt = created_dt.replace(
                             tzinfo=timezone.utc if created_dt.tzinfo is None else created_dt.tzinfo
-                        )).days
+                        )
+                        # Skip if not older than threshold
+                        if created_dt >= threshold_date:
+                            continue
+                        age_days = (datetime.now(timezone.utc) - created_dt).days
                         
                         outdated_candidates.append({
                             "id": hit.id,

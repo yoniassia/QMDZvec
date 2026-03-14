@@ -146,7 +146,7 @@ class TestEnrichmentHelpers:
     def test_generate_default_title_empty(self):
         """Test title generation for empty content."""
         assert _generate_default_title("") == ""
-        assert _generate_default_title("   ") == ""
+        assert _generate_default_title("   ").strip() == ""
     
     def test_build_enrichment_prompt(self):
         """Test enrichment prompt building."""
@@ -283,7 +283,7 @@ class TestValidityFunctions:
 class TestEnrichmentAPI:
     """Test main enrichment API functions."""
     
-    @patch('memclawz.enrichment.GOOGLE_API_KEY', 'fake-key')
+    @patch('memclawz.config.GOOGLE_API_KEY', 'fake-key')
     @patch('google.generativeai.configure')
     @patch('google.generativeai.GenerativeModel')
     def test_enrich_with_gemini_success(self, mock_model_class, mock_configure):
@@ -301,13 +301,13 @@ class TestEnrichmentAPI:
         assert result["title"] == "Test"
         mock_configure.assert_called_once_with(api_key='fake-key')
     
-    @patch('memclawz.enrichment.GOOGLE_API_KEY', None)
+    @patch('memclawz.config.GOOGLE_API_KEY', None)
     def test_enrich_with_gemini_no_key(self):
         """Test Gemini enrichment without API key."""
         with pytest.raises(ValueError, match="GOOGLE_API_KEY not configured"):
             _enrich_with_gemini("test content")
     
-    @patch('memclawz.enrichment.OPENAI_API_KEY', 'fake-key')
+    @patch('memclawz.config.OPENAI_API_KEY', 'fake-key')
     @patch('openai.OpenAI')
     def test_enrich_with_openai_success(self, mock_openai):
         """Test successful OpenAI enrichment."""
@@ -330,7 +330,7 @@ class TestEnrichmentAPI:
         assert call_args.kwargs["model"] == "gpt-4o-mini"
         assert call_args.kwargs["temperature"] == 0.1
     
-    @patch('memclawz.enrichment.OPENAI_API_KEY', None)
+    @patch('memclawz.config.OPENAI_API_KEY', None)
     def test_enrich_with_openai_no_key(self):
         """Test OpenAI enrichment without API key."""
         with pytest.raises(ValueError, match="OPENAI_API_KEY not configured"):

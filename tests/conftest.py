@@ -1,4 +1,4 @@
-"""Pytest configuration and shared fixtures for MemClawz E2E tests."""
+"""Pytest configuration and shared fixtures for MemClawz tests."""
 import asyncio
 import pytest
 import httpx
@@ -12,7 +12,7 @@ def base_url() -> str:
     return "http://localhost:3500"
 
 
-@pytest.fixture(scope="session")  
+@pytest.fixture(scope="session")
 def agent_id() -> str:
     """Unique agent ID for test isolation."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -62,9 +62,9 @@ def sample_memory_content() -> dict:
 
 @pytest.fixture
 def v7_memory_types() -> list:
-    """All 13 memory types supported in v7."""
+    """All memory types supported in v7."""
     return [
-        "fact", "decision", "preference", "relationship", "insight", "procedure", 
+        "fact", "decision", "preference", "relationship", "insight", "procedure",
         "event", "intention", "plan", "commitment", "action", "outcome", "cancellation"
     ]
 

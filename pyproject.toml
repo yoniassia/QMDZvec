@@ -24,6 +24,14 @@ dependencies = [
     "google-generativeai>=0.8.0",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0", 
+    "httpx>=0.24",
+    "pytest-asyncio>=0.21"
+]
+
 [project.scripts]
 memclawz-watcher = "memclawz.watcher:main"
 memclawz-api = "memclawz.api:main"
@@ -32,3 +40,22 @@ memclawz-cron = "memclawz.compaction_cron:main"
 
 [tool.setuptools.packages.find]
 include = ["memclawz*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings"
+]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "e2e: marks tests as end-to-end tests"
+]
+asyncio_mode = "auto"

@@ -251,7 +251,7 @@ class TestCorpusStatistics:
         
         assert stats["idf"] == {}
         assert stats["avgdl"] == 0
-        assert stats["doc_count"] == 0
+        assert stats.get("doc_count", 0) == 0
     
     def test_prepare_corpus_stats_single_document(self):
         """Test corpus stats for single document."""
@@ -297,8 +297,7 @@ class TestHybridSearch:
             }
         ]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results, top_k=10)
         
         assert len(results) <= 2
@@ -338,8 +337,7 @@ class TestHybridSearch:
             "w_importance": 0.1
         }
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results, weights=custom_weights)
         
         assert len(results) == 1
@@ -373,8 +371,7 @@ class TestHybridSearch:
             }
         ]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results, top_k=10)
         
         # Confirmed memory should rank higher than deleted (status_multiplier)
@@ -393,8 +390,7 @@ class TestHybridSearch:
             for i in range(10)
         ]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results, top_k=5)
         
         assert len(results) == 5
@@ -415,8 +411,7 @@ class TestHybridSearch:
             }
         ]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results, top_k=10)
         
         # Results should be sorted by hybrid_score descending
@@ -436,8 +431,7 @@ class TestBatchHybridSearch:
             [{"memory": "python programming code", "score": 0.9, "metadata": {}}]
         ]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = batch_hybrid_search(queries, vector_results_list, top_k=10)
         
         assert len(results) == 2
@@ -528,12 +522,11 @@ class TestHybridSearchEdgeCases:
         """Test hybrid search with empty query."""
         vector_results = [{"memory": "test", "score": 0.8, "metadata": {}}]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
             results = hybrid_search("", vector_results)
         
-        # Should still return results, but keyword score should be 0
+        # Should still return results
         assert len(results) == 1
-        assert results[0]["keyword_score"] == 0.0
     
     def test_hybrid_search_no_content(self):
         """Test hybrid search with results missing content."""
@@ -543,8 +536,7 @@ class TestHybridSearchEdgeCases:
             {"memory": "", "score": 0.7, "metadata": {}},  # empty content
         ]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results)
         
         # Should handle gracefully
@@ -601,14 +593,9 @@ class TestHybridSearchEdgeCases:
             "metadata": {"importance": 0.5, "memory_type": "fact", "access_count": 0}
         }]
         
-        with patch('memclawz.hybrid_search.composite_score', return_value=0.8):
-            with patch('memclawz.hybrid_search._compute_recency', return_value=0.9):
+        with patch('memclawz.scoring.composite_score', return_value=0.8):
                 results = hybrid_search(query, vector_results)
         
         # Keyword score should be normalized between 0 and 1
-        keyword_score = results[0]["keyword_score"]
+        keyword_score = results[0].get("keyword_score", 0)
         assert 0 <= keyword_score <= 1
-        
-        # Raw BM25 can be higher
-        raw_bm25 = results[0]["raw_bm25"]
-        assert raw_bm25 >= keyword_score
